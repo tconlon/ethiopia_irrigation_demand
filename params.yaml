@@ -1,0 +1,11 @@
+data_dir: '../data'
+chirps_dir: '/Volumes/Conlon Backup 2TB/chirps'
+tmp_dir:  '../data/chirps/tmp'
+
+irrigibility_lb: 80 # percent
+gw_depth: 20 # meters
+w2w_eff: 0.5 # wire to water efficiency
+h20_req: 6 #mm/day
+
+rescale_reprojected: True
+
