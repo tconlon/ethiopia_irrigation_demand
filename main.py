@@ -2,6 +2,7 @@ import os
 import argparse
 import yaml
 import numpy as np
+import pandas as pd
 import glob
 import pyproj
 
@@ -55,9 +56,6 @@ def load_irrigibility(args):
         ## Mask based on the irrigibility threshold
         cropped_src = src.read() >= args.irrigibility_lb
         cropped_src = np.array(cropped_src, dtype = np.uint8)
-
-
-        print(np.min(cropped_src))
 
         metadata = src.meta
         save_image_dest = os.path.join(args.data_dir, 'worqlul_irrigibility', 'land_suitability_cropped.tif')
@@ -169,14 +167,13 @@ def calculate_energy_deficit(args, cropped_irrig_filename, regions_shp):
                 out_irrig_image,  out_irrig_transform  = mask(irrig_src,  [projected_region], crop=True)
 
                 # Count the number of pixels that are irrigible and get indices
-                num_irrig_pixels = np.count_nonzero(out_irrig_image)
                 irrig_pixels_indices = np.nonzero(out_irrig_image)
 
                 # Find rainfall data at these pixels
                 rainfall_overlap = out_chirps_image[irrig_pixels_indices]
 
                 # Calculate water deficit at pixelwise basis
-                water_deficit = np.maximum(args.h20_req - rainfall_overlap/30, 0) # mm
+                water_deficit = np.maximum(args.h20_req - rainfall_overlap, 0) # mm
 
                 # Calculate volume of water deficit, each pixel is 1000m x 1000m
                 total_water_deficit_m3 = 1e-3 * np.sum(water_deficit) * 1e6
@@ -185,7 +182,7 @@ def calculate_energy_deficit(args, cropped_irrig_filename, regions_shp):
                 total_daily_energy = 1000 * total_water_deficit_m3 * 9.81 * args.gw_depth * 1/args.w2w_eff /(1e9 * 3600)
                 total_avg_power = total_daily_energy / 24 # MW
 
-                print(total_daily_energy)
+                # print(total_daily_energy)
 
                 regional_energy_deficit[i] = total_daily_energy
 
@@ -210,25 +207,36 @@ if __name__ == '__main__':
     # get arguments from .yaml
     args = get_args()
 
+    # print('a')
+
     cropped_irrig_filename = load_irrigibility(args)
 
     eth_shp = load_eth_shapefile(args)
     regions_shp = load_regions_shapefile(args)
+    cities = [i['properties']['CityName'] for i in regions_shp]
+    chirps_list = []
 
-    chirps_dirname = os.path.join(args.data_dir, 'chirps', 'rainfall_tifs')
-    chirps_list    = sorted(glob.glob(chirps_dirname + '/*.tif'))
+
+    chirps_dirname = os.path.join(args.chirps_dir, str(args.year))
+    chirps_list = sorted(glob.glob(chirps_dirname + '/*.tif'))
+    exports_df = pd.DataFrame(index = range(365), columns=cities)
+
 
     total_energy_deficit_timeseries = np.zeros((len(chirps_list), len(regions_shp)))
 
     for i, chirps_filename in enumerate(chirps_list):
-
+        print(i)
         reproject_chirps_rainfall(args, chirps_filename, cropped_irrig_filename, eth_shp)
         regional_energy_deficit = calculate_energy_deficit(args, cropped_irrig_filename, regions_shp)
-        total_energy_deficit_timeseries[i, : ] = regional_energy_deficit
+        exports_df.iloc[i, : ] = regional_energy_deficit
 
         # Clean up tmp dir
         tmp_files = glob.glob(args.tmp_dir + '/*')
         for f in tmp_files:
             os.remove(f)
 
-    # crop_irrigibility(args)
+    out_file = 'irrig_elec_results_year_{}_irriglb_{}_h20req_{}.csv'.format(args.year,
+                                                                            args.irrigibility_lb, args.h20_req)
+    outpath = os.path.join(args.elec_results_dir, out_file)
+    exports_df.to_csv(outpath)
+
