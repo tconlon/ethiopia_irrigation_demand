@@ -30,10 +30,8 @@ def fetchFiles(ftp, path, destination, overwrite=True):
         print("error: could not change to " + path)
         sys.exit("ending session")
 
-    # list children:
+    # Create list of images in CHIRPS FTP folder
     filelist = [i for i in ftp.nlst()]
-    # print(filelist)
-
 
     for file in filelist:
 
@@ -42,11 +40,12 @@ def fetchFiles(ftp, path, destination, overwrite=True):
             continue
         else:
             with open(fullpath, 'wb') as f:
+                # Download zipped file
                 ftp.retrbinary('RETR ' + file, f.write)
             print(file + ' downloaded')
 
-
 def unzip(dir):
+    # Unzip the downloaded imagery and remove zipped file
     for item in glob.glob(dir + '/*.gz'):  # loop through items in dir
         with gzip.open(item, 'rb') as f_in:
             with open(item[0:-3], 'wb') as f_out:
@@ -57,18 +56,23 @@ def unzip(dir):
 if __name__ == "__main__":
     args = get_args()
 
+    # Year of desired CHIRPS data
     year = '2018'
 
     ftp = FTP('ftp.chg.ucsb.edu')
     ftp.login()
 
+    # The source of CHIRPS data
     source = '/pub/org/chg/products/CHIRPS-2.0/africa_daily/tifs/p05/' + year +'/'
 
+    # Create destination folder for downloaded image
     dest = os.path.join(args.chirps_dir, year)
     if not os.path.exists(dest):
         os.mkdir(dest)
 
+    # Uncomment these two following lines to download more imagery
     # fetchFiles(ftp, source, dest, overwrite=True)
     # ftp.quit()
 
+    # This line unzips all the downloaded imagery
     unzip(dest)
