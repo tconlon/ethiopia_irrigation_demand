@@ -4,6 +4,7 @@ tmp_dir:  '../data/chirps/tmp'
 elec_results_dir: '../data/results'
 
 irrigibility_lb: 80 # percent
+frac_irrig: 1 # percent of land above irrigibility_lb to be irrigated
 gw_depth: 20 # meters
 w2w_eff: 0.5 # wire to water efficiency
 h20_req: 6 #mm/day

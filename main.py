@@ -179,10 +179,10 @@ def calculate_energy_deficit(args, cropped_irrig_filename, regions_shp):
                 total_water_deficit_m3 = 1e-3 * np.sum(water_deficit) * 1e6
 
                 # Calculate total energy required for water deficit, density = 1000 kg/m3, convert to GWh
-                total_daily_energy = 1000 * total_water_deficit_m3 * 9.81 * args.gw_depth * 1/args.w2w_eff /(1e9 * 3600)
-                total_avg_power = total_daily_energy / 24 # MW
+                total_daily_energy = (1000 * total_water_deficit_m3 * 9.81 * args.gw_depth * args.frac_irrig *
+                                      1/args.w2w_eff) / (1e9 * 3600)
+                # total_avg_power = total_daily_energy / 24 # GW
 
-                # print(total_daily_energy)
 
                 regional_energy_deficit[i] = total_daily_energy
 
