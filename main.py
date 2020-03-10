@@ -10,10 +10,9 @@ import fiona
 import rasterio
 from rasterio.mask import mask
 from rasterio.warp import reproject, Resampling
-
-from shapely.geometry import Polygon
-from shapely.ops import transform
-
+from dateutil.rrule import rrule, DAILY
+from datetime import datetime
+import geopandas as gpd
 
 def get_args():
     # Store all parameters for easy retrieval
@@ -33,14 +32,15 @@ def get_args():
 def load_regions_shapefile(args):
     # Load city-regions shapefiles
     shp_filename = os.path.join(args.data_dir, 'region_shapefiles', 'country_Theissen_Inters.shp')
-    regions_shp = fiona.open(shp_filename)
+    regions_shp = gpd.read_file(shp_filename).to_crs(epsg=32637)
     return regions_shp
 
 def load_eth_shapefile(args):
     # Load shapefile for all of Ethiopia
-    shp_filename = os.path.join(args.data_dir, 'eth_shapefile', 'ETH_outline.shp')
-    regions_shp = fiona.open(shp_filename)
+    shp_filename = os.path.join(args.data_dir, 'eth_shapefile', 'ETH_outline_epsg4326.shp')
+    regions_shp = gpd.read_file(shp_filename).to_crs(epsg=4326)
     return regions_shp
+
 
 def load_irrigibility(args):
     '''
@@ -111,7 +111,9 @@ def reproject_chirps_rainfall(args, chirps_filename, irrigibility_filename, eth_
     '''
 
     # Load Ethiopia shapefile -- Thanks Tim!
-    eth_poly = Polygon(eth_shp[0]['geometry']['coordinates'][0])
+    eth_poly = eth_shp['geometry'].iloc[0]
+
+
 
     # Load irrigibility map
     with rasterio.open(irrigibility_filename, 'r+') as irrig_src:
@@ -120,6 +122,7 @@ def reproject_chirps_rainfall(args, chirps_filename, irrigibility_filename, eth_
 
         # Open CHIRPS rainfall file and crop to Ethiopia
         with rasterio.open(chirps_filename, 'r+') as chirps_src:
+            # print(chirps_src.meta)
             # Crop CHIRPS data to Ethiopia
             out_rainfall_image, out_rainfall_transform = mask(chirps_src, [eth_poly], crop=True)
             cropped_chirps_metadata = chirps_src.meta
@@ -158,14 +161,14 @@ def reproject_chirps_rainfall(args, chirps_filename, irrigibility_filename, eth_
             rescale_reprojected_rainfall()
 
 
-def project_wsg_shape_to_csr(shape, csr):
-
-    # Need to reproject the city-region shapefiles into the same coordinate reference system as the irrigiblity map
-    project = lambda x, y: pyproj.transform(
-    pyproj.Proj(init='epsg:4326'),
-    pyproj.Proj(init=csr),
-    x, y)
-    return transform(project, shape)
+# def project_wsg_shape_to_csr(shape, csr):
+#
+#     # Need to reproject the city-region shapefiles into the same coordinate reference system as the irrigiblity map
+#     project = lambda x, y: pyproj.transform(
+#     pyproj.Proj('epsg:4326'),
+#     pyproj.Proj(csr),
+#     x, y)
+#     return transform(project, shape)
 
 
 def calculate_energy_deficit(args, thresholded_irrig_filename, regions_shp):
@@ -179,19 +182,23 @@ def calculate_energy_deficit(args, thresholded_irrig_filename, regions_shp):
     regional_energy_deficit = np.zeros((num_regions))
 
     # Open thresholded irrigibility map
-    with rasterio.open(thresholded_irrig_filename, 'r+') as irrig_src:
+    with rasterio.open(thresholded_irrig_filename, 'r') as irrig_src:
+        # print(irrig_src.meta)
+
         # Open reprojected daily CHIRPS tif
-        with rasterio.open(chirps_reproj, 'r+') as chirps_src:
+        with rasterio.open(chirps_reproj, 'r') as chirps_src:
+            # print(chirps_src.meta)
+
             # Loop through the city-regions
-            for i, j in enumerate(regions_shp):
+            for i in range(len(regions_shp)):
                 # Load the city-region polygon
-                region_poly = Polygon(j['geometry']['coordinates'][0])
+                region_poly = regions_shp['geometry'].iloc[i]
+
                 # Reproject the city-region polygon
-                projected_region = project_wsg_shape_to_csr(region_poly, 'epsg:32637')
 
                 # Crop reprojected CHIRPS and irrigibility map
-                out_chirps_image, out_chirps_transform = mask(chirps_src, [projected_region], crop=True)
-                out_irrig_image,  out_irrig_transform  = mask(irrig_src,  [projected_region], crop=True)
+                out_chirps_image, out_chirps_transform = mask(chirps_src, [region_poly], crop=True)
+                out_irrig_image,  out_irrig_transform  = mask(irrig_src,  [region_poly], crop=True)
 
                 # Count the number of pixels that are irrigible and get indices
                 irrig_pixels_indices = np.nonzero(out_irrig_image)
@@ -243,7 +250,7 @@ if __name__ == '__main__':
     regions_shp = load_regions_shapefile(args)
 
     # Extract city-region names from shapefile
-    cities = [i['properties']['CityName'] for i in regions_shp]
+    cities = [i + ' [GWh]' for i in list(regions_shp['CityName'])]
 
     # Set the CHIRPS directory name for the year in question
     chirps_dirname = os.path.join(args.chirps_dir, str(args.year))
@@ -252,7 +259,10 @@ if __name__ == '__main__':
     chirps_list = sorted(glob.glob(chirps_dirname + '/*.tif'))
 
     # Create dataframe for exporting results
-    exports_df = pd.DataFrame(index = range(365), columns=cities)
+    start_date = datetime(2018, 1, 1)
+    date_list = list(rrule(freq=DAILY, dtstart= start_date, count = 365))
+
+    exports_df = pd.DataFrame(index = [i.strftime('%m/%d/%Y') for i in date_list], columns=cities)
 
     # Loop through all the CHIRPS files in the directory
     for i, chirps_filename in enumerate(chirps_list):
@@ -266,7 +276,7 @@ if __name__ == '__main__':
         regional_energy_deficit = calculate_energy_deficit(args, thresholded_irrig_filename, regions_shp)
 
         # Store energy deficit calculations for export
-        exports_df.iloc[i, : ] = regional_energy_deficit
+        exports_df.iloc[i, :] = regional_energy_deficit
 
         # Clean up tmp dir
         tmp_files = glob.glob(args.tmp_dir + '/*')
@@ -274,8 +284,10 @@ if __name__ == '__main__':
             os.remove(f)
 
     # Create filename for results export
-    out_file = 'irrig_elec_results_year_{}_irriglb_{}_h20req_{}.csv'.format(args.year,
-                                                                            args.irrigibility_lb, args.h20_req)
+    out_file = 'irrig_elec_results_year_{}_irriglb_{}_fracirrig_{}_h20req_{}mm.csv'.format(args.year,
+                                                                            args.irrigibility_lb,
+                                                                            args.frac_irrig,
+                                                                            args.h20_req)
     outpath = os.path.join(args.elec_results_dir, out_file)
 
     # Export results!
